@@ -6,11 +6,11 @@ def create_index_matrix(
     fraction: float=1.0,
     seed: int=10,
     with_replacement: bool=True
-) -> pl.LazyFrame:
+) -> pl.DataFrame:
     pl.set_random_seed(seed)
     integer_range = pl.int_range(0, n_rows)
     return (
-        pl.LazyFrame(
+        pl.DataFrame(
             pl.Series(pl.select(integer_range)).alias("index")
         )
         .with_columns(
@@ -23,5 +23,5 @@ def create_index_matrix(
     )
 
 if __name__ == "__main__":
-    random_integers_matrix = create_index_matrix(10, 5).collect()
+    random_integers_matrix = create_index_matrix(10, 5)
     print(random_integers_matrix)

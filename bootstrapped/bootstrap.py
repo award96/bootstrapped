@@ -1,4 +1,4 @@
-from turtle import pd
+from collections.abc import Iterable as IterableABC
 from typing import (
     Callable,
     Iterable,
@@ -31,7 +31,7 @@ def bootstrap_simulation(
         A dictionary of bootstrap results, with the statistic name as the key.
     """
     observed: pl.LazyFrame = arrays_to_pl_lazyframe(observed)
-    bootstrap_sample_indices: pl.LazyFrame = generate.create_index_matrix(
+    bootstrap_sample_indices: pl.DataFrame = generate.create_index_matrix(
         n_rows=len(observed),
         n_bootstraps=n_bootstraps,
         seed=seed
@@ -44,7 +44,7 @@ def bootstrap_simulation(
     for i in range(n_bootstraps):
         for input_idx, obs in enumerate(observed):
             bs_sample = obs.select(pl.all().gather(
-                 bootstrap_sample_indices.select(str(i))
+                 bootstrap_sample_indices[str(i)]
             ))
             for j, stat in enumerate(statistics):
                 result = stat(bs_sample.collect())
@@ -76,29 +76,27 @@ def arrays_to_pl_lazyframe(
     )
 
 def arrays_to_iter_of_series(
-        observed: Iterable[Union[Iterable[Union[int, float]], int, float]]
-    ) -> Iterable[pl.Series]:
-    """Convert an array of arrays to an iterator of series."""
-    # if observed is not a nested array
-    # and is just a simple array of numbers
-    # TODO does this work for lists, numpy ndarrays, pandas dataframes, pandas series,
-    # torch arrays, etc?
-    if not hasattr(next(observed), "__iter__"):
-        yield pl.Series(observed)
-    else:
-        # TODO check that everything is in the correct format
-        # All sub arrays are of the same length
-        # All sub arrays are of the same dtype
-        # All sub arrays are numeric
-        for sub_array in observed:
-            # TODO how to type check without importing pandas?
-            if isinstance(sub_array, pd.Series):
-                yield pl.from_pandas(sub_array)
-            elif isinstance(sub_array, np.ndarray):
-                yield pl.from_numpy(sub_array)
-            elif isinstance(sub_array, arrow.Array):
-                yield pl.from_arrow(sub_array)
-            elif isinstance(sub_array, pl.Series):
-                yield sub_array
-            else:
-                yield pl.Series(sub_array)
+    observed: Iterable[Union[Iterable[Union[int, float]], int, float]]
+) -> Iterable[pl.Series]:
+    """Convert an array of arrays (or a single array) to an iterator of Polars Series."""
+    # Materialize into a list so we can inspect it multiple times
+    obs_list = list(observed)
+
+    # 1) Detect a single one-dimensional array of numbers
+    if all(not isinstance(el, IterableABC) for el in obs_list):
+        # e.g. [1, 2, 3, 4]
+        yield pl.Series(obs_list)
+        return
+
+    # 2) Otherwise we assume a “list of lists” – enforce consistency
+    lengths = [len(el) for el in obs_list]
+    if len(set(lengths)) != 1:
+        raise ValueError("All sub‐arrays must have the same length for bootstrapping.")
+
+    # 3) Convert each element into a Series
+    for sub_array in obs_list:
+        if isinstance(sub_array, pl.Series):
+            yield sub_array
+        else:
+            # Polars will coerce numpy arrays, Arrow arrays, pandas Series, Python lists, etc.
+            yield pl.Series(sub_array)
